@@ -1,8 +1,36 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>AF Farm Planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap">
+<!-- Firebase (gedeelde calculator-opslag) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, set, onValue, serverTimestamp, onDisconnect, push, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB5bYZIAO6IiTnvGYSVxRFxPSvjaPR0_1M",
+    authDomain: "af-ava-build-calculator.firebaseapp.com",
+    databaseURL: "https://af-ava-build-calculator-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "af-ava-build-calculator",
+    storageBucket: "af-ava-build-calculator.firebasestorage.app",
+    messagingSenderId: "843688205357",
+    appId: "1:843688205357:web:760c2fde388039644e6ca4"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // Make Firebase available globally for the React app
+  window._firebaseDb = db;
+  window._firebaseRef = ref;
+  window._firebaseSet = set;
+  window._firebaseOnValue = onValue;
+  window._firebaseServerTimestamp = serverTimestamp;
+  window._firebaseOnDisconnect = onDisconnect;
+  window._firebasePush = push;
+  window._firebaseRemove = remove;
+  window._firebaseReady = true;
+  window.dispatchEvent(new Event('firebaseReady'));
+</script>
 <style>
 :root{
   color-scheme:dark;
@@ -20991,5 +21019,3 @@ function afLoad() {
   return l;
 }
 window.AFCalcApp = App;</script>
-
-</html>
