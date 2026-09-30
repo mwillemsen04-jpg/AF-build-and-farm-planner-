@@ -1525,12 +1525,12 @@ function farmFillList(){ const m=farmAll(); const ids=Object.keys(m).sort((a,b)=
 $('hdrFarm').onchange=e=>{ const v=e.target.value; if(v==='__new'){ $('farmNew').click(); return; } if(v&&v!==S.farmId){ $('farmList').value=v; $('farmLoad').click(); } };
 function esc(t){ return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function farmEnsure(){ if(!S.farmId){ S.farmId='f'+Date.now().toString(36); S.farmName=S.farmName||'Farm '+(Object.keys(farmAll()).length+1); } }
-function farmDirty(){ if(FLOCK) return; clearTimeout(FT); FT=setTimeout(farmWrite,1500); }
-async function farmWrite(){ if(FLOCK) return; farmEnsure(); const t=Date.now(); S.farmSaved=t; store.set('settings',S);
+var FDIRTY=0; function farmDirty(){ if(FLOCK) return; FDIRTY=1; clearTimeout(FT); FT=setTimeout(farmWrite,1500); }
+async function farmWrite(){ if(FLOCK) return; FDIRTY=0; farmEnsure(); const t=Date.now(); S.farmSaved=t; store.set('settings',S);
   const body={name:S.farmName,saved:t,json:JSON.stringify(farmSnap())};
   const L=farmLocal(); L[S.farmId]=body; store.set('farms',L);
-  if(FDB&&FUID){ try{ await FDB.doc(`data/users/${FUID}/f_${S.farmId}`).set(body); await FDB.doc(`data/users/${FUID}/last`).set({id:S.farmId}); FREM[S.farmId]={name:body.name,saved:t}; farmStatus('Saved in your account · '+new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})); }
-    catch(e){ farmStatus(e&&e.code==='quota_exceeded'?'Account storage full: delete an old farm':'Saved in this browser only'); } }
+  if(FDB&&FUID){ try{ await FDB.doc(`data/users/${FUID}/f_${S.farmId}`).set(body); await FDB.doc(`data/users/${FUID}/last`).set({id:S.farmId}); FREM[S.farmId]={name:body.name,saved:t}; farmStatus('Saved online, shared · '+new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})); }
+    catch(e){ farmStatus(e&&e.code==='quota_exceeded'?'Online storage full: delete an old farm':'Saved in this browser only'); } }
   else farmStatus('Saved in this browser · '+new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}));
   farmFillList(); }
 async function farmBody(id){ let b=farmLocal()[id]; if(FDB&&FUID&&FREM[id]&&(!b||FREM[id].saved>b.saved)){ try{ const d=await FDB.doc(`data/users/${FUID}/f_${id}`).get(); if(d.exists) b=d.data(); }catch(e){} } return b; }
@@ -1569,14 +1569,30 @@ $('farmFile').addEventListener('change',async e=>{ const f=e.target.files[0]; e.
   catch(err){ farmStatus('Not a farm file'); } });
 window.__farmT=Object.assign(window.__farmT||{},{farms:{snap:farmSnap,write:farmWrite,apply:farmApply,all:farmAll}});
 farmEnsure(); farmFillList(); farmStatus(S.farmSaved?'Saved in this browser':'');
-(async()=>{ try{ if(!window.claude||!claude.use) return; const [db,us]=await Promise.all([claude.use('db'),claude.use('user')]); if(!db||!us) return; const uid=await us.id(); if(!uid) return; FDB=db; FUID=uid;
-  const q=await db.collection(`data/users/${uid}`).get(); let last=null;
-  q.docs.forEach(d=>{ const x=d.data()||{}; if(d.id==='last') last=x.id; else if(d.id.startsWith('f_')) FREM[d.id.slice(2)]={name:x.name,saved:x.saved||0}; });
-  farmFillList();
-  // another device saved newer work: open it here
+(async()=>{ try{
+  await new Promise(res=>{ if(window._firebaseReady) res(); else window.addEventListener('firebaseReady',res,{once:true}); setTimeout(res,8000); });
+  if(!window._firebaseDb) return;
+  const db=window._firebaseDb, R=window._firebaseRef, SET=window._firebaseSet, REM=window._firebaseRemove, ON=window._firebaseOnValue;
+  let REMOTE={}, LASTK='afp_last';
+  FUID='shared';
+  // shared farm list in Firebase (same for everyone); "last opened farm" stays per device
+  FDB={ doc:p=>{ const k=p.split('/').pop();
+    if(k==='last') return { set:async x=>{ try{ localStorage.setItem(LASTK,x.id); }catch(e){} }, delete:async()=>{} };
+    return { set:b=>SET(R(db,'planner/farms/'+k),b), delete:()=>REM(R(db,'planner/farms/'+k)), get:async()=>({exists:!!REMOTE[k],data:()=>REMOTE[k]}) }; } };
+  let first=true;
+  await new Promise(res=>{ ON(R(db,'planner/farms'),snap=>{
+    REMOTE=snap.val()||{}; for(const k in FREM) delete FREM[k];
+    for(const k in REMOTE) if(k.startsWith('f_')) FREM[k.slice(2)]={name:REMOTE[k].name,saved:REMOTE[k].saved||0};
+    farmFillList();
+    if(first){ first=false; res(); return; }
+    // someone else saved a newer version of the farm you have open: load it (unless you have unsaved edits)
+    const cur=S.farmId&&FREM[S.farmId]; const rb=REMOTE['f_'+S.farmId];
+    if(cur&&rb&&cur.saved>(S.farmSaved||0)&&!FDIRTY){ try{ farmApply(S.farmId,rb.name,JSON.parse(rb.json)); S.farmSaved=rb.saved; store.set('settings',S); farmStatus('Updated: someone else changed this farm · '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})); }catch(e){} }
+  },()=>res()); setTimeout(res,8000); });
+  let last=null; try{ last=localStorage.getItem(LASTK); }catch(e){}
   const want=last&&FREM[last]?last:null; const localNewer=S.farmId&&(farmLocal()[S.farmId]||{}).saved;
-  if(want&&(want!==S.farmId?(!routes.length||FREM[want].saved>(S.farmSaved||0)):FREM[want].saved>(localNewer||0))){ const b=await farmBody(want); if(b){ farmApply(want,b.name,JSON.parse(b.json)); farmStatus('Opened “'+b.name+'” from your account'); return; } }
-  if(routes.length||S.farmSaved) farmWrite(); else farmStatus('Saved in your account');
+  if(want&&(want!==S.farmId?(!routes.length||FREM[want].saved>(S.farmSaved||0)):FREM[want].saved>(localNewer||0))){ const b=await farmBody(want); if(b){ farmApply(want,b.name,JSON.parse(b.json)); farmStatus('Opened “'+b.name+'” from the shared list'); return; } }
+  if(routes.length||S.farmSaved) farmWrite(); else farmStatus('Connected: farms are shared');
 }catch(e){} })();
 renderRoutes(); fit(); requestAnimationFrame(tick);
 window.addEventListener('resize',()=>{ if(!s) fit(); });
